@@ -43,6 +43,40 @@ void printaddrinfo(struct addrinfo *servinfo) {
     }
 }
 
+// Returns a socket file descriptor, or exits on error.
+int socket_w(int domain, int type, int protocol) {
+    int sock = socket(domain, type, protocol);
+    if (sock < 0) {
+        exit(1);
+    } else {
+        printf("The socket is: %d\n", sock);
+        return sock;
+    }
+}
+
+// Binds the socket to the specified port on the loopback IP address.
+void bind_w(int sock, int port_no) {
+    struct sockaddr_in listenAddr;
+    memset(&listenAddr, 0, sizeof(listenAddr));
+    listenAddr.sin_family = AF_INET;
+    listenAddr.sin_port = htons(port_no);
+    listenAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(sock, (struct sockaddr *) &listenAddr, sizeof(listenAddr)) < 0) {
+        exit(1);
+    }
+    printf("Socket is bound\n");
+}
+
+// Sets a socket to listen and handles any errors.
+void listen_w(int sock) {
+    if (listen(sock, 1) < 0) {
+        exit(1);
+    }
+    printf("Socket is listening\n");
+}
+
+// 
+
 // Input:
 // socket - the client socket from where data will be read
 // uri - a pointer to where the uri will be saved
@@ -54,7 +88,9 @@ int process_http_header(int socket, char *uri) {
 
 int main(int argc, char **argv) {
     // Get the port number, if it was given.
-    int port_no;
+    struct addrinfo *servinfo;
+    int port_no, sock, client_sock;
+    struct sockaddr_storage client_addr;
     if (argc != 2) {
         exit(1);
     } else {
@@ -63,9 +99,19 @@ int main(int argc, char **argv) {
     printf("The port number is: %d\n", port_no);
 
     // Get the address info struct
-    struct addrinfo *servinfo;
+    printaddrinfo(servinfo);
     getaddrinfo_w(argv[1], servinfo);
     printaddrinfo(servinfo);
+    sock = socket_w(PF_INET, SOCK_STREAM, 0);
+    bind_w(sock, port_no);
+    listen_w(sock);
+    while(1) {
+        socklen_t addr_size = sizeof client_addr;
+        if ((client_sock = accept(sock, (struct sockaddr *) &client_addr, &addr_size)) < 0) {
+            exit(1);
+        }
+        printf("New client socket no: %d\n", client_sock);
+    }
     freeaddrinfo(servinfo);
     return 0;
 }
