@@ -5,6 +5,57 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <setjmp.h>
+
+#define READ_STATE_BUFFER 32
+#define ERROR_END_OF_STREAM -1
+#define ERROR_WHILE_RECEIVING -2
+#define URI_SIZE 255
+
+// Struct used for reading in info from the socket.
+typedef struct {
+    char *buffer;
+    int size;
+    int index;
+} read_state_t;
+
+// Initializes the read_state_t struct for reading from the socket.
+read_state_t* read_next_init() {
+    read_state_t *read_state = (read_state_t *) malloc(sizeof(read_state_t));
+    read_state->buffer = (char *) malloc(sizeof(char) * READ_STATE_BUFFER);
+    read_state->size = 0;
+    read_state->index = 0;
+    return read_state;
+}
+
+// Frees allocated memory from reading from the socket.
+void read_next_free(read_state_t *read_state) {
+    free(read_state->buffer);
+    free(read_state);
+}
+
+char read_next_char(int socket, read_state_t *read_state, jmp_buf error_handler) {
+    char ch;
+
+    if (read_state->index < read_state->size) {
+        ch = read_state->buffer[read_state->index];
+        read_state->index = read_state->index + 1;
+        return ch;
+    }
+
+    read_state->size = recv(socket, read_state->buffer, READ_STATE_BUFFER, 0);
+    if (read_state->size == 0) {
+        // End of stream.
+        longjmp(error_handler, ERROR_END_OF_STREAM);
+    } else if (read_state->size < 0) {
+        // Error occurred.
+        longjmp(error_handler, ERROR_WHILE_RECEIVING);
+    }
+
+    ch = read_state->buffer[0];
+    read_state->index = 1;
+    return ch;
+}
 
 // Make sure that you check for error codes!  This is best done by using a wrapper
 // function around things (like socket, listen, call, connect).
@@ -75,14 +126,31 @@ void listen_w(int sock) {
     printf("Socket is listening\n");
 }
 
-// 
-
 // Input:
 // socket - the client socket from where data will be read
 // uri - a pointer to where the uri will be saved
 // Output:
 // returns 0 if there was no error and -1 if an error has occured
 int process_http_header(int socket, char *uri) {
+    int error = 0;
+    char ch;
+    jmp_buf error_handler;
+    read_state_t* read_state = read_next_init();
+    for (int i=0; i<10; i++) {
+        error = setjmp(error_handler);
+        if (error >= 0) {
+            ch = read_next_char(socket, read_state, error_handler);
+            uri[i] = ch;
+        } else {
+            switch(error) {
+                case ERROR_END_OF_STREAM:
+                    exit(1);
+                case ERROR_WHILE_RECEIVING:
+                    exit(1);
+            }
+        }
+    }
+    read_next_free(read_state);
     return 0;
 }
 
@@ -91,6 +159,7 @@ int main(int argc, char **argv) {
     struct addrinfo *servinfo;
     int port_no, sock, client_sock;
     struct sockaddr_storage client_addr;
+    char uri[URI_SIZE] = {0};
     if (argc != 2) {
         exit(1);
     } else {
@@ -111,6 +180,8 @@ int main(int argc, char **argv) {
             exit(1);
         }
         printf("New client socket no: %d\n", client_sock);
+        process_http_header(client_sock, uri);
+        printf("HTTP header: %s\n", uri);
     }
     freeaddrinfo(servinfo);
     return 0;
