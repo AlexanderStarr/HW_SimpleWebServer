@@ -242,6 +242,9 @@ int main(int argc, char **argv) {
         }
         send_header(client_sock, head_id);
         if (head_id == 0) send_body(client_sock, fp);
+        memset(uri, 0, sizeof uri);
+        sprintf(uri, "static");
+        close(client_sock);
     }
     freeaddrinfo(servinfo);
     return 0;
