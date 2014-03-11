@@ -134,37 +134,50 @@ void listen_w(int sock) {
 // returns 0 if there was no error and -1 if an error has occured
 int process_http_header(int socket, char *uri) {
     int error = 0;
+    int i = 6;
     char ch;
     jmp_buf error_handler;
     read_state_t* read_state = read_next_init();
-    for (int i=0; uri[i]!='\0'; i++) {
-        error = setjmp(error_handler);
-        if (error >= 0) {
-            ch = read_next_char(socket, read_state, error_handler);
+    error = setjmp(error_handler);
+    if (error >= 0) {
+        if (read_next_char(socket, read_state, error_handler) != 'G') return -1;
+        if (read_next_char(socket, read_state, error_handler) != 'E') return -1;
+        if (read_next_char(socket, read_state, error_handler) != 'T') return -1;
+        if (read_next_char(socket, read_state, error_handler) != ' ') return -1;
+        ch = read_next_char(socket, read_state, error_handler);
+        // Fill the uri buffer up with the address (it's prepended with 'static')
+        while (ch != ' ') {
             uri[i] = ch;
-        } else {
-            switch(error) {
-                case ERROR_END_OF_STREAM:
-                    exit(1);
-                case ERROR_WHILE_RECEIVING:
-                    exit(1);
-            }
+            i += 1;
+            ch = read_next_char(socket, read_state, error_handler);
+        }
+    } else {
+        switch(error) {
+            case ERROR_END_OF_STREAM:
+                exit(1);
+            case ERROR_WHILE_RECEIVING:
+                exit(1);
         }
     }
     read_next_free(read_state);
+    printf("Request address: %s\n", uri);
     return 0;
 }
 
-// Sends the specified header (0 for '200 OK', 1 for '400 Bad Request')
+// Sends the specified header
+// 0 for '200 OK', 1 for '400 Bad Request', 2 for '404 Not Found'
 void send_header(int client_sock, int head_type) {
-    char ok_head[MAX_LEN] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-    char bad_head[MAX_LEN] = "HTTP/1.1 400 Bad Request\r\n\r\n";
+    char ok_head[45] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    char bad_head[29] = "HTTP/1.1 400 Bad Request\r\n\r\n";
+    char notfound_head[27] = "HTTP/1.1 404 Not Found\r\n\r\n";
     char *header;
     int len, bytes_sent;
     if (head_type == 0) {
         header = ok_head;
-    } else {
+    } else if (head_type == 1) {
         header = bad_head;
+    } else if (head_type == 2) {
+        header = notfound_head;
     }
     len = strlen(header);
     printf("Header length = %d\n", len);
@@ -175,15 +188,24 @@ void send_header(int client_sock, int head_type) {
     }
 }
 
+void send_body(int client_sock, FILE *fp) {
+    char line[MAX_LEN];
+    int len, bytes_sent;
+    while (fgets(line, MAX_LEN, fp) != NULL) {
+        len = strlen(line);
+        bytes_sent = send(client_sock, line, len, 0);
+    }
+}
+
 // Sends the given html file.
 
 int main(int argc, char **argv) {
     // Get the port number, if it was given.
     struct addrinfo *servinfo;
-    int port_no, sock, client_sock, phh_res;
+    int port_no, sock, client_sock, head_id;
     struct sockaddr_storage client_addr;
-    char uri[URI_SIZE] = {0};
-    char body[MAX_LEN] = "<html><h1>It worked?</h1></html>";
+    char uri[URI_SIZE + 7] = "static";
+    FILE *fp;
     if (argc != 2) {
         exit(1);
     } else {
@@ -204,18 +226,22 @@ int main(int argc, char **argv) {
             exit(1);
         }
         printf("New client socket no: %d\n", client_sock);
-        phh_res = process_http_header(client_sock, uri);
-        printf("HTTP header: %s\n", uri);
-        FILE *fp = fopen("static/index.html", "r");
-        if (fp==NULL) {
-            exit(1);
+        if (process_http_header(client_sock, uri) == -1) {
+            // We want a 'Bad request' response if the http_header is invalid.
+            head_id = 1;
+        } else {
+            // Otherwise we will look for the file.
+            fp = fopen(uri, "r");
+            if (fp==NULL) {
+                // If not found, then we will return a 'Not found' response.
+                head_id = 2;
+            } else {
+                // Otherwise, we will send the header to prepend the file.
+                head_id = 0;
+            }
         }
-        int len, bytes_sent;
-        send_header(client_sock, 0);
-        len = strlen(body);
-        printf("Body length = %d\n", len);
-        bytes_sent = send(client_sock, body, len, 0);
-        printf("Bytes sent = %d\n", bytes_sent);
+        send_header(client_sock, head_id);
+        if (head_id == 0) send_body(client_sock, fp);
     }
     freeaddrinfo(servinfo);
     return 0;
