@@ -11,6 +11,7 @@
 #define ERROR_END_OF_STREAM -1
 #define ERROR_WHILE_RECEIVING -2
 #define URI_SIZE 255
+#define MAX_LEN 1024
 
 // Struct used for reading in info from the socket.
 typedef struct {
@@ -136,7 +137,7 @@ int process_http_header(int socket, char *uri) {
     char ch;
     jmp_buf error_handler;
     read_state_t* read_state = read_next_init();
-    for (int i=0; i<10; i++) {
+    for (int i=0; uri[i]!='\0'; i++) {
         error = setjmp(error_handler);
         if (error >= 0) {
             ch = read_next_char(socket, read_state, error_handler);
@@ -154,12 +155,35 @@ int process_http_header(int socket, char *uri) {
     return 0;
 }
 
+// Sends the specified header (0 for '200 OK', 1 for '400 Bad Request')
+void send_header(int client_sock, int head_type) {
+    char ok_head[MAX_LEN] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    char bad_head[MAX_LEN] = "HTTP/1.1 400 Bad Request\r\n\r\n";
+    char *header;
+    int len, bytes_sent;
+    if (head_type == 0) {
+        header = ok_head;
+    } else {
+        header = bad_head;
+    }
+    len = strlen(header);
+    printf("Header length = %d\n", len);
+    bytes_sent = send(client_sock, header, len, 0);
+    printf("Bytes sent = %d\n", bytes_sent);
+    if (bytes_sent < 0) {
+        exit(1);
+    }
+}
+
+// Sends the given html file.
+
 int main(int argc, char **argv) {
     // Get the port number, if it was given.
     struct addrinfo *servinfo;
-    int port_no, sock, client_sock;
+    int port_no, sock, client_sock, phh_res;
     struct sockaddr_storage client_addr;
     char uri[URI_SIZE] = {0};
+    char body[MAX_LEN] = "<html><h1>It worked?</h1></html>";
     if (argc != 2) {
         exit(1);
     } else {
@@ -180,8 +204,18 @@ int main(int argc, char **argv) {
             exit(1);
         }
         printf("New client socket no: %d\n", client_sock);
-        process_http_header(client_sock, uri);
+        phh_res = process_http_header(client_sock, uri);
         printf("HTTP header: %s\n", uri);
+        FILE *fp = fopen("static/index.html", "r");
+        if (fp==NULL) {
+            exit(1);
+        }
+        int len, bytes_sent;
+        send_header(client_sock, 0);
+        len = strlen(body);
+        printf("Body length = %d\n", len);
+        bytes_sent = send(client_sock, body, len, 0);
+        printf("Bytes sent = %d\n", bytes_sent);
     }
     freeaddrinfo(servinfo);
     return 0;
