@@ -151,10 +151,34 @@ int process_http_header(int socket, char *uri) {
             i += 1;
             ch = read_next_char(socket, read_state, error_handler);
         }
+        if (read_next_char(socket, read_state, error_handler) != 'H') return -1;
+        if (read_next_char(socket, read_state, error_handler) != 'T') return -1;
+        if (read_next_char(socket, read_state, error_handler) != 'T') return -1;
+        if (read_next_char(socket, read_state, error_handler) != 'P') return -1;
+        if (read_next_char(socket, read_state, error_handler) != '/') return -1;
+        if (read_next_char(socket, read_state, error_handler) != '1') return -1;
+        if (read_next_char(socket, read_state, error_handler) != '.') return -1;
+        if (read_next_char(socket, read_state, error_handler) != '1') return -1;
+        ch = read_next_char(socket, read_state, error_handler);
+        while (1) {
+            while (ch != '\r') {
+                ch = read_next_char(socket, read_state, error_handler);
+            }
+            ch = read_next_char(socket, read_state, error_handler);
+            if (ch == '\n') {
+                ch = read_next_char(socket, read_state, error_handler);
+                if (ch == '\r') {
+                    ch = read_next_char(socket, read_state, error_handler);
+                    if (ch == '\n') {
+                        return 0;
+                    }
+                }
+            }
+        }
     } else {
         switch(error) {
             case ERROR_END_OF_STREAM:
-                exit(1);
+                return -1;
             case ERROR_WHILE_RECEIVING:
                 exit(1);
         }
