@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netdb.h>
 #include <setjmp.h>
 
@@ -248,16 +249,35 @@ void send_header(int client_sock, int head_type) {
 // Sends the text of the given file to the socket.
 // This assumes that the file exists and the file pointer is valid.
 void send_body(int client_sock, FILE *fp) {
-    char line[MAX_LEN];
-    int len, bytes_sent;
+    struct stat file_stats;
+    char *line;
+    int len, bytes_sent, fd, file_size;
+    // Get the size of the file.
+    fd = fileno(fp);
+    if (fstat(fd, &file_stats) < 0) {
+        perror("couldn't get file stats");
+        exit(1);
+    }
+    file_size = file_stats.st_size;
+    //printf("File size is: %d\n", file_size);
+    // Allocate an array which can hold the whole file.
+    // Thus it can hold the largest line in the file.
+    line = (char*) malloc(file_size*sizeof(char) + 1);
+    if (line == NULL) {
+        perror("memory allocation failed");
+        exit(1);
+    }
     // While there are still lines in the file, send them to the socket.
     while (fgets(line, MAX_LEN, fp) != NULL) {
         len = strlen(line);
         bytes_sent = send(client_sock, line, len, 0);
         if (bytes_sent < 0) {
             perror("body send failed");
+            exit(1);
         }
     }
+    // Free the allocated memory.
+    free(line);
 }
 
 int main(int argc, char **argv) {
@@ -284,6 +304,7 @@ int main(int argc, char **argv) {
     sock = socket_w(PF_INET, SOCK_STREAM, 0);
     bind_w(sock, port_no);
     listen_w(sock);
+    printf("Server is ready on port %d\n", port_no);
     while(1) {
         // Accept client requests to the socket already created.
         // Create a socket for each client.
