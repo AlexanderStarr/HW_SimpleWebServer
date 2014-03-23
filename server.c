@@ -14,7 +14,6 @@
 #define ERROR_END_OF_STREAM -1
 #define ERROR_WHILE_RECEIVING -2
 #define URI_SIZE 255
-#define MAX_LEN 1024
 
 // Struct used for reading in info from the socket.
 typedef struct {
@@ -102,7 +101,7 @@ int socket_w(int domain, int type, int protocol) {
     int sock = socket(domain, type, protocol);
     if (sock < 0) {
         perror("socket failed");
-        exit(1);
+        exit(-1);
     } else {
         //printf("The socket is: %d\n", sock);
         return sock;
@@ -118,7 +117,7 @@ void bind_w(int sock, int port_no) {
     listenAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(sock, (struct sockaddr *) &listenAddr, sizeof(listenAddr)) < 0) {
         perror("bind failed");
-        exit(1);
+        exit(-1);
     }
     //printf("Socket is bound\n");
 }
@@ -127,7 +126,7 @@ void bind_w(int sock, int port_no) {
 void listen_w(int sock) {
     if (listen(sock, 1) < 0) {
         perror("listen failed");
-        exit(1);
+        exit(-1);
     }
     //printf("Socket is listening\n");
 }
@@ -218,15 +217,28 @@ int process_http_header(int socket, char *uri) {
     return 0;
 }
 
+// Sends a character array to the socket, doing all necessary error checking.
+void send_array(char *buf, int client_sock) {
+    int len = strlen(buf);
+    int bytes_sent = 0;
+    while (bytes_sent != len) {
+        if (bytes_sent < 0) {
+            perror("send failed");
+            exit(1);
+        }
+        bytes_sent = send(client_sock, buf, len, 0);
+        printf("Buffer bytes sent = %d\n", bytes_sent);
+    }
+}
+
 // Sends the specified header
 // 0 for '200 OK', 1 for '400 Bad Request', 2 for '404 Not Found'
 void send_header(int client_sock, int head_type) {
     // Initialize the header strings and other variables.
-    char ok_head[45] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-    char bad_head[29] = "HTTP/1.1 400 Bad Request\r\n\r\n";
-    char notfound_head[27] = "HTTP/1.1 404 Not Found\r\n\r\n";
+    char ok_head[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    char bad_head[] = "HTTP/1.1 400 Bad Request\r\n\r\n<html><head><title>Bad Request</title></head><body><h1>Error 400</h1><p>Bad Request</p></body></html>";
+    char notfound_head[] = "HTTP/1.1 404 Not Found\r\n\r\n<html><head><title>Not Found</title></head><body><h1>Error 404</h1><p>Not Found</p></body></html>";
     char *header;
-    int len, bytes_sent;
     // Assign the proper header string based on the head_type.
     if (head_type == 0) {
         header = ok_head;
@@ -236,14 +248,7 @@ void send_header(int client_sock, int head_type) {
         header = notfound_head;
     }
     // Then send the header string to the socket.
-    len = strlen(header);
-    //printf("Header length = %d\n", len);
-    bytes_sent = send(client_sock, header, len, 0);
-    //printf("Bytes sent = %d\n", bytes_sent);
-    if (bytes_sent < 0) {
-        perror("header send failed");
-        exit(1);
-    }
+    send_array(header, client_sock);
 }
 
 // Sends the text of the given file to the socket.
@@ -268,13 +273,17 @@ void send_body(int client_sock, FILE *fp) {
         exit(1);
     }
     // While there are still lines in the file, send them to the socket.
-    while (fgets(line, MAX_LEN, fp) != NULL) {
-        len = strlen(line);
-        bytes_sent = send(client_sock, line, len, 0);
-        if (bytes_sent < 0) {
-            perror("body send failed");
-            exit(1);
-        }
+    while (fgets(line, file_size+1, fp) != NULL) {
+        /*len = strlen(line);
+        bytes_sent = 0;
+        while (bytes_sent != len) {
+            if (bytes_sent < 0) {
+                perror("body send failed");
+                exit(1);
+            }
+            bytes_sent = send(client_sock, line, len, 0);
+        }*/
+        send_array(line, client_sock);
     }
     // Free the allocated memory.
     free(line);
@@ -311,7 +320,7 @@ int main(int argc, char **argv) {
         socklen_t addr_size = sizeof client_addr;
         if ((client_sock = accept(sock, (struct sockaddr *) &client_addr, &addr_size)) < 0) {
             perror("accept failed");
-            exit(1);
+            exit(-1);
         }
         //printf("New client socket no: %d\n", client_sock);
 
@@ -321,10 +330,14 @@ int main(int argc, char **argv) {
             head_id = 1;
         } else {
             // Otherwise we will look for the file.
+            //printf("The uri requested is: %s\n", uri);
+            // Should check to see if they requested just a directory.
+            // can do this with fstat I believe.
             fp = fopen(uri, "r");
             if (fp==NULL) {
                 // If not found, then we will return a 'Not found' response.
                 head_id = 2;
+                perror("Not found");
             } else {
                 // Otherwise, we will send the header to prepend the file.
                 head_id = 0;
