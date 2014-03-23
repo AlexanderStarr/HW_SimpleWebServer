@@ -218,22 +218,28 @@ int process_http_header(int socket, char *uri) {
 }
 
 // Sends a character array to the socket, doing all necessary error checking.
-void send_array(char *buf, int client_sock) {
+// It also makes sure the entire message is sent, sending as many times as needed.
+// Returns -1 for an error, 0 for success.
+int send_array(char *buf, int client_sock) {
     int len = strlen(buf);
+    int i = 0;
     int bytes_sent = 0;
-    while (bytes_sent != len) {
+    while (i < len) {
+        bytes_sent = send(client_sock, &buf[i], len - i, 0);
         if (bytes_sent < 0) {
             perror("send failed");
-            exit(1);
+            return -1;
         }
-        bytes_sent = send(client_sock, buf, len, 0);
-        printf("Buffer bytes sent = %d\n", bytes_sent);
+        //printf("Buffer bytes sent = %d\n", bytes_sent);
+        i = i + bytes_sent;
     }
+    return 0;
 }
 
 // Sends the specified header
 // 0 for '200 OK', 1 for '400 Bad Request', 2 for '404 Not Found'
-void send_header(int client_sock, int head_type) {
+// Returns -1 for an error, 0 for success.
+int send_header(int client_sock, int head_type) {
     // Initialize the header strings and other variables.
     char ok_head[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
     char bad_head[] = "HTTP/1.1 400 Bad Request\r\n\r\n<html><head><title>Bad Request</title></head><body><h1>Error 400</h1><p>Bad Request</p></body></html>";
@@ -248,12 +254,17 @@ void send_header(int client_sock, int head_type) {
         header = notfound_head;
     }
     // Then send the header string to the socket.
-    send_array(header, client_sock);
+    if (send_array(header, client_sock) < 0) {
+        return -1;
+    } else {
+        return 0;
+    }
 }
 
 // Sends the text of the given file to the socket.
 // This assumes that the file exists and the file pointer is valid.
-void send_body(int client_sock, FILE *fp) {
+// Returns -1 for an error, 0 for success.
+int send_body(int client_sock, FILE *fp) {
     struct stat file_stats;
     char *line;
     int len, bytes_sent, fd, file_size;
@@ -261,7 +272,7 @@ void send_body(int client_sock, FILE *fp) {
     fd = fileno(fp);
     if (fstat(fd, &file_stats) < 0) {
         perror("couldn't get file stats");
-        exit(1);
+        exit(-1);
     }
     file_size = file_stats.st_size;
     //printf("File size is: %d\n", file_size);
@@ -270,28 +281,24 @@ void send_body(int client_sock, FILE *fp) {
     line = (char*) malloc(file_size*sizeof(char) + 1);
     if (line == NULL) {
         perror("memory allocation failed");
-        exit(1);
+        exit(-1);
     }
     // While there are still lines in the file, send them to the socket.
     while (fgets(line, file_size+1, fp) != NULL) {
-        /*len = strlen(line);
-        bytes_sent = 0;
-        while (bytes_sent != len) {
-            if (bytes_sent < 0) {
-                perror("body send failed");
-                exit(1);
-            }
-            bytes_sent = send(client_sock, line, len, 0);
-        }*/
-        send_array(line, client_sock);
+        if (send_array(line, client_sock) < 0) {
+            // Free the memory and return an error if send_array() fails.
+            free(line);
+            return -1;
+        }
     }
     // Free the allocated memory.
     free(line);
+    return 0;
 }
 
 int main(int argc, char **argv) {
     //struct addrinfo *servinfo;
-    int port_no, sock, client_sock, head_id;
+    int port_no, sock, client_sock, head_id, send_ok;
     struct sockaddr_storage client_addr;
     char uri[URI_SIZE + 7] = "static";
     FILE *fp;
@@ -344,10 +351,10 @@ int main(int argc, char **argv) {
             }
         }
         // Send the appropriate header.
-        send_header(client_sock, head_id);
+        send_ok = send_header(client_sock, head_id);
 
         // The request is good and the file exists, so send the file.
-        if (head_id == 0) send_body(client_sock, fp);
+        if (head_id == 0 && send_ok == 0) send_body(client_sock, fp);
 
         // Then reset the uri buffer and close the connection to the client.
         memset(uri, 0, sizeof uri);
