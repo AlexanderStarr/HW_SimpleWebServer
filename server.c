@@ -75,7 +75,7 @@ void getaddrinfo_w(char *port_no, struct addrinfo *servinfo) {
 
     if ((status = getaddrinfo(NULL, port_no, &hints, &servinfo)) != 0) {
         perror("getaddrinf failed");
-        exit(1);
+        exit(-1);
     } else {
         printf("getaddrinf returned no errors.\n");
     }
@@ -208,7 +208,7 @@ int process_http_header(int socket, char *uri) {
                 return -1;
             case ERROR_WHILE_RECEIVING:
                 perror("error while receiving");
-                exit(1);
+                exit(-1);
         }
     }
     // Free up the memory.
@@ -305,7 +305,7 @@ int main(int argc, char **argv) {
     // Get the port number, if it was given.
     if (argc != 2) {
         perror("no port provided");
-        exit(1);
+        exit(-1);
     } else {
         port_no = atoi(argv[1]);
     }
