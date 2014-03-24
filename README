@@ -4,3 +4,14 @@ Compiled with gcc:
 Apple LLVM version 5.0 (clang-500.2.79) (based on LLVM 3.3svn)
 Target: x86_64-apple-darwin13.0.0
 Thread model: posix
+
+Notes:
+
+Starting the server:
+- The server is started by running the compiled file from the command line, with an additional argument, the port number to run on.  
+- For example, if the compiled file is called `output`, then to run the server you would type `./output 8000`.
+
+Sending requests:
+- Requests are sent to the server as HTTP requests.  These can be sent by a browser or telnet.  The address in the request should be the loopback address (127.0.0.1), and the port number is the one specified when running the server.
+- For example, in the browser you would visit `127.0.0.1:8000/index.html`
+- Or to run in telnet, start telnet from the command line with `telnet 127.0.0.1 8000` and then enter the request `GET /index.html HTTP/1.1`.
